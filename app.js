@@ -1,4 +1,5 @@
 mapboxgl.accessToken = 'pk.eyJ1IjoiZGVuemVybiIsImEiOiJjbDJnbnZndnIwNTA5M2luejE5b2lkamliIn0.VSMPKp2PdR4oPFBQwSrznw';
+
 const map = new mapboxgl.Map({
   container: 'map',
   style: 'mapbox://styles/mapbox/streets-v12',
@@ -9,6 +10,27 @@ const map = new mapboxgl.Map({
 let index = 0; // Index of the current country to fly to
 let countries = []; // Array to hold country data
 
+let userInteracting = false;
+let spinEnabled = true;
+
+const secondsPerRevolution = 120;
+const maxSpinZoom = 5;
+const slowSpinZoom = 3;
+
+function spinGlobe() {
+  const zoom = map.getZoom();
+  if (spinEnabled && !userInteracting && zoom < maxSpinZoom) {
+    let distancePerSecond = 360 / secondsPerRevolution;
+    if (zoom > slowSpinZoom) {
+      const zoomDif = (maxSpinZoom - zoom) / (maxSpinZoom - slowSpinZoom);
+      distancePerSecond *= zoomDif;
+    }
+    const center = map.getCenter();
+    center.lng -= distancePerSecond;
+    map.easeTo({ center, duration: 1000, easing: (n) => n });
+  }
+}
+
 map.on('load', function() {
   fetch('https://restcountries.com/v3.1/all')
     .then(response => response.json())
@@ -16,8 +38,15 @@ map.on('load', function() {
       countries = data.map(country => ({
         name: country.cca3,
         capital: country.capital && country.capital[0] ? country.capital[0] : 'N/A',
-        countryName: country.name.common
+        countryName: country.name.common,
+        flags: [country.flags.png],
+        languages: Object.values(country.languages || {}), // Official languages
+        population: country.population, // Population
+        area: country.area, // Area/Size
+        region: country.region, // Continent
+        currencies: Object.values(country.currencies || {}).map(c => c.name) // Currency
       }));
+      
 
       map.addSource('country-boundaries', {
         type: 'vector',
@@ -45,14 +74,86 @@ map.on('load', function() {
         },
         filter: ["in", "iso_3166_1_alpha_3", ""]
       });
+
+      spinGlobe();
     });
+});
+
+map.on('mousedown', () => {
+  userInteracting = true;
+});
+
+map.on('mouseup', () => {
+  userInteracting = false;
+  spinGlobe();
+});
+
+map.on('dragend', () => {
+  userInteracting = false;
+  spinGlobe();
+});
+
+map.on('pitchend', () => {
+  userInteracting = false;
+  spinGlobe();
+});
+
+map.on('rotateend', () => {
+  userInteracting = false;
+  spinGlobe();
+});
+
+map.on('moveend', () => {
+  spinGlobe();
+});
+
+document.getElementById('btn-spin').addEventListener('click', (e) => {
+  spinEnabled = !spinEnabled;
+  if (spinEnabled) {
+    spinGlobe();
+    e.target.innerHTML = 'Freeze';
+  } else {
+    map.stop();
+    e.target.innerHTML = 'Spin';
+  }
 });
 
 function flyToAndHighlightCountry(country) {
   const infoDiv = document.getElementById('info');
-  infoDiv.textContent = `Country: ${country.countryName}, Capital: ${country.capital}`;
+  
+  let flagHTML = `<img src="${country.flags[0]}" alt="Flag of ${country.countryName}" width="100" />`;
+
+  // Construct the string for languages
+  let languagesHTML = country.languages.join(', ');
+
+  // Construct the string for currencies
+  let currenciesHTML = country.currencies.join(', ');
+
+  // Prepare the languages string
+  let languagesArr = Object.values(country.languages || {});
+  let languagesStr = '';
+  for (let i = 0; i < languagesArr.length; i++) {
+    languagesStr += languagesArr[i];
+    if ((i + 1) % 2 === 0 && i !== languagesArr.length - 1) {
+      languagesStr += '<br>'; // Add a line break after every two languages
+    } else if (i !== languagesArr.length - 1) {
+      languagesStr += ', ';
+    }
+  }
+
+  infoDiv.innerHTML = `<div>${flagHTML}</div>
+                       <h2>${country.countryName}</h2>
+                       <p>Capital: ${country.capital}</p>
+                       <p><b>Official Languages:</b> ${languagesStr}</p>
+                       <p>Population: ${country.population.toLocaleString()}</p>
+                       <p>Area: ${country.area.toLocaleString()} sq km</p>
+                       <p>Continent: ${country.region}</p>
+                       <p>Currency: ${currenciesHTML}</p>`;
 
   if (country.capital === 'N/A') return;
+
+  spinEnabled = false;
+  document.getElementById('btn-spin').innerHTML = 'Spin';
 
   fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${country.capital}.json?access_token=${mapboxgl.accessToken}`)
     .then(response => response.json())
@@ -66,10 +167,8 @@ function flyToAndHighlightCountry(country) {
 
       map.setFilter('highlighted-country', ["in", "iso_3166_1_alpha_3", country.name]);
 
-      // Show the 'Fly Back' button once the 'Fly' button is pressed
       document.getElementById('fly-back').style.display = 'block';
 
-      // Make the info element visible
       infoDiv.style.opacity = '1';
     });
 }
