@@ -79,6 +79,24 @@ map.on('load', function() {
     });
 });
 
+// New click event listener for the map
+map.on('click', function(e) {
+  const features = map.queryRenderedFeatures(e.point, { layers: ['country-boundaries'] });
+
+  if (!features.length) {
+    return;
+  }
+
+  const clickedCountry = features[0];
+  
+  // Check if the clicked country exists in your countries list
+  const country = countries.find(country => country.name === clickedCountry.properties.iso_3166_1_alpha_3);
+  
+  if (country) {
+    flyToAndHighlightCountry(country);
+  }
+});
+
 map.on('mousedown', () => {
   userInteracting = true;
 });
